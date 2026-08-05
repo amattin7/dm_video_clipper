@@ -304,34 +304,115 @@
 
   let stills = []; // {id, dataUrl, time, label}
   let idCounter = 1;
+  let sessionVideoBlob = null; // the raw File/Blob currently loaded, or null
+  let sessionVideoName = null;
+  let sessionVideoType = null;
+  let pendingRestoreTime = null; // scrub position to jump to once a restored video loads
 
   function fmt(t){
     if(!isFinite(t)) return '0.00s';
     return t.toFixed(2)+'s';
   }
 
-  // ---- storage (best-effort) ----
-  let saveTimer = null;
-  function persist(){
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(async ()=>{
+  // ---- durable storage (IndexedDB, best-effort) ----
+  // Unlike localStorage, IndexedDB can hold the actual video Blob, not just
+  // strings — which matters here: iOS Safari has a known habit of silently
+  // reloading the tab right after the native Photos picker hands a *video*
+  // back to the page (it jetsam-kills the backgrounded tab under the memory
+  // pressure of the picker's own export/preview step). That reload wipes
+  // every JS variable, so the only way to survive it is to have already
+  // written the picked file to durable storage a moment earlier, then
+  // auto-resume from it on the next page load.
+  const DB_NAME = 'flourish-db';
+  const STORE = 'session';
+  const SESSION_KEY = 'current';
+  let dbPromise = null;
+  function openDB(){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject)=>{
       try{
-        await window.storage.set('flourish-session', JSON.stringify({stills, idCounter}), false);
-      }catch(e){ /* best effort, ignore */ }
-    }, 400);
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = ()=>{ req.result.createObjectStore(STORE, {keyPath:'id'}); };
+        req.onsuccess = ()=> resolve(req.result);
+        req.onerror = ()=> reject(req.error);
+      }catch(e){ reject(e); }
+    });
+    return dbPromise;
+  }
+  async function idbGet(){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve, reject)=>{
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(SESSION_KEY);
+        req.onsuccess = ()=> resolve(req.result || null);
+        req.onerror = ()=> reject(req.error);
+      });
+    }catch(e){ return null; }
+  }
+  async function idbPut(record){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve, reject)=>{
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(Object.assign({id: SESSION_KEY}, record));
+        tx.oncomplete = ()=> resolve(true);
+        tx.onerror = ()=> reject(tx.error);
+      });
+    }catch(e){ return false; }
+  }
+  async function idbClear(){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve, reject)=>{
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(SESSION_KEY);
+        tx.oncomplete = ()=> resolve(true);
+        tx.onerror = ()=> reject(tx.error);
+      });
+    }catch(e){ return false; }
+  }
+
+  let saveTimer = null;
+  async function persistSession(){
+    await idbPut({
+      videoBlob: sessionVideoBlob,
+      videoName: sessionVideoName,
+      videoType: sessionVideoType,
+      stills, idCounter,
+      lastTime: video.currentTime || 0
+    });
+  }
+  function schedulePersist(){
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(persistSession, 400);
   }
   async function restore(){
     try{
-      const r = await window.storage.get('flourish-session', false);
-      if(r && r.value){
-        const data = JSON.parse(r.value);
-        if(data.stills && data.stills.length){
-          stills = data.stills;
-          idCounter = data.idCounter || (stills.length+1);
-          stripSection.style.display = 'block';
-          renderStrip();
-          statusEl.textContent = 'Restored '+stills.length+' still(s) from your last session.';
-        }
+      const rec = await idbGet();
+      if(!rec) return;
+      let restoredSomething = false;
+      if(rec.stills && rec.stills.length){
+        stills = rec.stills;
+        idCounter = rec.idCounter || (stills.length+1);
+        restoredSomething = true;
+      }
+      if(rec.videoBlob){
+        sessionVideoBlob = rec.videoBlob;
+        sessionVideoName = rec.videoName || 'video';
+        sessionVideoType = rec.videoType || '';
+        pendingRestoreTime = rec.lastTime || 0;
+        video.src = URL.createObjectURL(rec.videoBlob);
+        playerSection.style.display = 'block';
+        restoredSomething = true;
+      }
+      if(restoredSomething){
+        stripSection.style.display = 'block';
+        renderStrip();
+        const parts = [];
+        if(rec.videoBlob) parts.push('your in-progress video');
+        if(stills.length) parts.push(stills.length+' still(s)');
+        statusEl.textContent = 'Recovered '+parts.join(' and ')+' after an interruption.';
       }
     }catch(e){ /* no prior session, ignore */ }
   }
@@ -356,6 +437,15 @@
     loadStatus.className = 'load-status';
     loadStatus.innerHTML = '<span class="spinner"></span> Loading '+(file.name||'video')+'&hellip;';
 
+    // Write the file to IndexedDB right away, before doing anything else with
+    // it. If iOS reloads the tab moments from now (see note above), this is
+    // what lets the next page load pick the video back up automatically
+    // instead of sending you back to a blank "choose a video" screen.
+    sessionVideoBlob = file;
+    sessionVideoName = file.name || 'video';
+    sessionVideoType = file.type || '';
+    persistSession();
+
     clearTimeout(loadTimeoutId);
     loadTimeoutId = setTimeout(()=>{
       loadStatus.className = 'load-status warn';
@@ -374,7 +464,12 @@
     loadStatus.style.display = 'none';
     scrubber.max = video.duration;
     durTime.textContent = fmt(video.duration);
-    video.currentTime = 0;
+    if(pendingRestoreTime != null){
+      video.currentTime = Math.min(pendingRestoreTime, video.duration || pendingRestoreTime);
+      pendingRestoreTime = null;
+    } else {
+      video.currentTime = 0;
+    }
   });
 
   video.addEventListener('error', ()=>{
@@ -388,6 +483,7 @@
   });
   video.addEventListener('seeked', ()=>{
     curTime.textContent = fmt(video.currentTime);
+    schedulePersist(); // keep the resume position roughly up to date too
   });
 
   scrubber.addEventListener('input', ()=>{
@@ -420,7 +516,7 @@
       label: 'Step '+(stills.length+1)
     });
     renderStrip();
-    persist();
+    schedulePersist();
     statusEl.textContent = 'Captured at '+fmt(video.currentTime)+'.';
   });
 
@@ -469,21 +565,25 @@
       stills.splice(idx,1);
     }
     renderStrip();
-    persist();
+    schedulePersist();
   });
 
   strip.addEventListener('change', (e)=>{
     if(!e.target.classList.contains('frame-label')) return;
     const id = parseInt(e.target.getAttribute('data-id'));
     const s = stills.find(s=>s.id===id);
-    if(s){ s.label = e.target.value || s.label; persist(); }
+    if(s){ s.label = e.target.value || s.label; schedulePersist(); }
   });
 
   resetBtn.addEventListener('click', ()=>{
     if(!confirm('Clear the loaded video and all captured stills?')) return;
+    clearTimeout(saveTimer);
     stills = [];
+    sessionVideoBlob = null;
+    sessionVideoName = null;
+    sessionVideoType = null;
+    idbClear();
     renderStrip();
-    persist();
     playerSection.style.display = 'none';
     video.removeAttribute('src');
     video.load();
@@ -608,6 +708,6 @@ ${framesHtml}
   });
 
 })();
-<\/script>
+</script>
 </body>
 </html>
