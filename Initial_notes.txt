@@ -1,0 +1,53 @@
+PROJECT: Flourish Breakdown — video-to-stills practice tool
+
+WHAT IT IS:
+Self-contained single-file HTML/CSS/JS tool (no build step, no dependencies)
+for drum major mace flourish practice. Load a video, scrub through it with
+fine nudge controls, capture stills at chosen frames, arrange/caption them
+into a step sequence, then export a second standalone offline HTML file
+("Practice Guide") with the images embedded as data URIs — viewable full-
+screen, swipeable, works with zero connectivity.
+
+CURRENT FILE:
+2026-08-04_Flourish-Video-Breakdown-Tool.html — built and iterated inside
+Claude.ai as an artifact.
+
+FEATURES DONE:
+- Video file picker (native iOS photo picker via <input type=file accept=video/*>)
+- Custom scrub slider + 6 nudge buttons (±1s, ±0.1s, ±1/30s "frame")
+- Capture button → draws current video frame to canvas → JPEG dataURL
+- Reorderable/deletable/relabelable filmstrip of captured stills
+- Practice Mode: fullscreen step-through with swipe + prev/next nav
+- Export: generates a second standalone offline HTML file (images inlined)
+  for on-phone offline use, downloaded via Blob
+- Best-effort session persistence via a `window.storage` key-value API
+  (Claude-artifact-only; this API doesn't exist outside Claude, so it's a
+  silent no-op elsewhere — not a bug if missing on other hosts)
+
+BUGS FIXED THIS SESSION:
+- Added visible loading-state / timeout warning after video selection
+  (previously failed silently if the iOS picker selection wasn't confirmed
+  or an iCloud-only video was still downloading)
+- Fixed upload control (a <label>) rendering as fragmented across two
+  lines — it defaulted to display:inline; added display:block
+
+OPEN ISSUE (unresolved):
+When run inside Claude's in-app artifact viewer on iOS, selecting a video
+from the native photo picker causes the whole page/JS state to reset —
+happens even with a 2-second clip, so it's not memory/size-related. Best
+working theory: Claude's in-app webview gets torn down when iOS hands
+control to the native picker and back, unlike a real Safari tab.
+
+NEXT STEP (in progress):
+Moving the file to GitHub Pages to get a real https:// URL that opens in
+actual mobile Safari (not Claude's iframe, not a Files-app preview), which
+should survive the picker hand-off. User is setting up a public repo +
+Pages via GitHub's web UI. Once live, need to verify the reset bug is
+actually gone in real Safari — if it is, that confirms the Claude-webview
+theory; if not, the picker-handling logic itself needs a rework
+(e.g. checking file.length / add a manual "confirm loaded" step).
+
+DESIGN NOTES:
+Dark charcoal/brass palette, high-contrast for outdoor visibility, large
+touch targets for one-handed operation. No external font/CDN dependencies
+by design, since the exported Practice Guide needs to work fully offline.
