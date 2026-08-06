@@ -319,7 +319,7 @@
 
 </main>
 
-<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-05.6</footer>
+<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-05.7</footer>
 
 <canvas id="canvas"></canvas>
 <div id="printSheet" class="print-sheet"></div>
@@ -616,8 +616,40 @@
   // can at least say so clearly and fast instead of leaving a silent blank
   // screen, which is what stallCheckTimer below is for.
   let framesSeen = false;
+  let blankCheckDone = false;
   let stallCheckTimer = null;
-  function markFrameSeen(){ framesSeen = true; clearTimeout(stallCheckTimer); }
+  function markFrameSeen(){
+    framesSeen = true;
+    clearTimeout(stallCheckTimer);
+    if(!blankCheckDone){
+      blankCheckDone = true;
+      setTimeout(runBlankFrameCheck, 120); // give the frame a beat to actually paint
+    }
+  }
+  // Some decode-progressing videos still render solid black — readyState
+  // advances fine (so the stall check above never fires) but there's no
+  // real picture, which is what happened with an HDR-sourced iMovie export.
+  // Sample a shrunk copy of the current frame and check if it's basically
+  // all zero.
+  function runBlankFrameCheck(){
+    try{
+      if(!video.videoWidth) return;
+      const sw = 32, sh = Math.max(1, Math.round(sw * video.videoHeight / video.videoWidth));
+      const tc = document.createElement('canvas');
+      tc.width = sw; tc.height = sh;
+      const tctx = tc.getContext('2d');
+      tctx.drawImage(video, 0, 0, sw, sh);
+      const data = tctx.getImageData(0, 0, sw, sh).data;
+      let total = 0;
+      for(let i=0; i<data.length; i+=4){ total += data[i]+data[i+1]+data[i+2]; }
+      const avg = total / (data.length/4*3);
+      if(avg < 3){
+        loadStatus.style.display = 'flex';
+        loadStatus.className = 'load-status warn';
+        loadStatus.innerHTML = '&#9888; This video loaded and decodes (size, length, and playback progress all look right), but the picture is coming out solid black. This is a different symptom of the same root problem as a video that never decodes at all — most likely HDR color data Safari fails to tone-map, even though other apps display it fine. Re-exporting through iMovie doesn\'t reliably fix this one, since it usually carries the HDR tagging straight through. If you can, try recording a fresh clip with "HDR Video" turned off in Settings &rarr; Camera &rarr; Record Video.';
+      }
+    }catch(e){ /* canvas sampling unsupported here; skip silently */ }
+  }
 
   video.addEventListener('loadedmetadata', ()=>{
     clearTimeout(loadTimeoutId);
@@ -633,6 +665,7 @@
       video.currentTime = 0;
     }
     framesSeen = false;
+    blankCheckDone = false;
     clearTimeout(stallCheckTimer);
     stallCheckTimer = setTimeout(()=>{
       if(framesSeen) return;
