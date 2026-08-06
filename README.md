@@ -2,10 +2,10 @@
 
 Self-contained, single-file HTML/CSS/JS tool for drum major mace flourish
 practice. Load a video, scrub through it with fine nudge controls, capture
-stills at chosen frames, arrange/caption them into a step sequence, then
-export a second standalone offline HTML file ("Practice Guide") with the
-images embedded as data URIs — viewable fullscreen, swipeable, works with
-zero connectivity.
+stills at chosen frames, and arrange/caption them into a step sequence.
+Save named guides to an on-device library for fullscreen, swipeable
+practice viewing anytime — works with zero connectivity — or export a
+still-by-still PDF to share or print.
 
 No build step, no dependencies, no backend.
 

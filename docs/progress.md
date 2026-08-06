@@ -97,3 +97,48 @@ Prevention can clear script-writable storage (including IndexedDB) for
 origins the user hasn't interacted with in 7 days. Not a concern for active
 use of the tool; only relevant if someone loads the page, walks away for a
 week, and expects an in-progress session to still be sitting there.
+
+## 2026-08-05 — Confirmed the fix; replaced offline-file export with a library + PDF
+
+**Confirmed:** the reload still happens (it's OS-level, as expected), but
+IndexedDB persistence is doing its job — the app now resumes cleanly instead
+of losing the video/stills.
+
+**New problem surfaced:** the exported standalone "Practice Guide" HTML file
+(the original offline-distribution mechanism) doesn't render reliably once
+downloaded and reopened on iOS — Safari's handling of a locally-opened
+`.html` file is inconsistent about actually running its script (sometimes
+just shows a Quick Look-style static preview). The in-app Practice Mode,
+served live from the Pages URL, works great by contrast — so the fix is to
+lean on that instead of fighting the download-and-reopen path.
+
+**Changes:**
+- Removed the "export standalone offline HTML" feature entirely (the Blob
+  download of a second self-contained guide file) — superseded by the two
+  items below.
+- Added a **Saved Guides library**: a new always-visible section above the
+  main workflow, backed by a second IndexedDB object store (`guides`,
+  bumped `flourish-db` to version 2). "Save to library" prompts for a name
+  and stores the current stills as a named, dated guide; the library lists
+  every saved guide with thumbnail, still count, rename-in-place, a "View"
+  button that opens the same fullscreen Practice Mode overlay, and delete.
+  Lives entirely on-device (no accounts, no backend) — chosen over a
+  cross-device cloud option since guides only ever need to be viewed on
+  the phone they were captured on, and this keeps zero-connectivity
+  behavior intact.
+- Practice Mode was refactored to take an explicit stills array
+  (`openPractice(stillsArr)`) instead of always reading the global working
+  set, so it can show either the in-progress captures or a saved guide's
+  stills.
+- Added **"Save as PDF"**: renders the stills into a hidden print-only sheet
+  (`@media print` stylesheet, one still per page) and calls the browser's
+  native `window.print()`. On iOS this opens the standard print preview,
+  where the share icon offers "Save to Files" as a real, non-interactive
+  PDF — which iOS displays natively and reliably, unlike the old downloaded
+  HTML file. Zero new dependencies; uses only built-in browser print
+  support.
+
+**Still to verify on-device:** that `window.print()` → Share → Save to
+Files actually produces a clean multi-page PDF on the user's phone, and
+that the saved-guides library survives normal day-to-day use (reopening the
+app days later, per the ITP caveat above).

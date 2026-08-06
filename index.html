@@ -148,6 +148,15 @@
   .icon-btn.danger{color:#d98878;}
   .icon-btn:active{background:var(--line);}
 
+  /* ---- Saved guides library ---- */
+  .guide-card .frame-thumb{width:52px; height:52px;}
+  .guide-name{
+    width:100%; background:none; border:none; color:var(--text);
+    font-size:14px; font-weight:700; padding:2px 0;
+  }
+  .guide-actions{display:flex; flex-direction:column; gap:5px;}
+  .guide-actions .icon-btn{width:44px; font-size:11px; font-weight:700; text-transform:uppercase;}
+
   /* ---- Buttons row ---- */
   .action-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;}
   .btn{
@@ -210,6 +219,33 @@
     animation:spin .7s linear infinite;
   }
   @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* ---- Print / Save-as-PDF sheet ----
+     Hidden on screen; only shown (and everything else hidden) when the
+     browser's own print engine runs, via window.print(). This is how
+     "Save as PDF" produces a normal, non-interactive PDF using nothing
+     but built-in browser features — no library, no server. */
+  .print-sheet{display:none;}
+  @media print{
+    body *{visibility:hidden;}
+    .print-sheet, .print-sheet *{visibility:visible;}
+    .print-sheet{
+      display:block; position:absolute; left:0; top:0; width:100%;
+      background:#fff; color:#111;
+    }
+    .print-page{
+      page-break-after:always; padding:36px 24px; text-align:center;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      min-height:90vh;
+    }
+    .print-page:last-child{page-break-after:auto;}
+    .print-page img{max-width:100%; max-height:75vh; object-fit:contain;}
+    .print-fnum{
+      font-family:Arial, sans-serif; font-weight:800; letter-spacing:.08em;
+      font-size:12px; color:#777; margin-bottom:14px; text-transform:uppercase;
+    }
+    .print-flabel{margin-top:16px; font-size:20px; font-weight:700; color:#111;}
+  }
 </style>
 </head>
 <body>
@@ -221,6 +257,12 @@
 </header>
 
 <main>
+
+  <section id="librarySection">
+    <div class="section-title"><h2>Saved practice guides</h2></div>
+    <div id="libraryEmpty" class="filmstrip-empty">No saved guides yet — capture some stills below, then use "Save to library" to keep a named guide here for next time. Saved guides live on this device and work with zero connectivity.</div>
+    <div class="strip" id="libraryList"></div>
+  </section>
 
   <section id="loadSection">
     <div class="section-title"><span class="section-num">01</span><h2>Load a clip</h2></div>
@@ -261,7 +303,8 @@
 
     <div class="action-grid">
       <button class="btn primary" id="practiceBtn" disabled>Practice mode</button>
-      <button class="btn" id="exportBtn" disabled>Save guide (offline)</button>
+      <button class="btn" id="saveLibraryBtn" disabled>Save to library</button>
+      <button class="btn btn-full" id="savePdfBtn" disabled>Save as PDF</button>
       <button class="btn btn-full" id="resetBtn">Clear everything &amp; start over</button>
     </div>
     <div class="status" id="status"></div>
@@ -270,6 +313,7 @@
 </main>
 
 <canvas id="canvas"></canvas>
+<div id="printSheet" class="print-sheet"></div>
 
 <div class="practice-overlay" id="practiceOverlay">
   <div class="practice-top">
@@ -298,9 +342,13 @@
   const strip = document.getElementById('strip');
   const filmstripEmpty = document.getElementById('filmstripEmpty');
   const practiceBtn = document.getElementById('practiceBtn');
-  const exportBtn = document.getElementById('exportBtn');
+  const saveLibraryBtn = document.getElementById('saveLibraryBtn');
+  const savePdfBtn = document.getElementById('savePdfBtn');
   const resetBtn = document.getElementById('resetBtn');
   const statusEl = document.getElementById('status');
+  const libraryList = document.getElementById('libraryList');
+  const libraryEmpty = document.getElementById('libraryEmpty');
+  const printSheet = document.getElementById('printSheet');
 
   let stills = []; // {id, dataUrl, time, label}
   let idCounter = 1;
@@ -324,49 +372,66 @@
   // written the picked file to durable storage a moment earlier, then
   // auto-resume from it on the next page load.
   const DB_NAME = 'flourish-db';
-  const STORE = 'session';
+  const DB_VERSION = 2;
+  const SESSION_STORE = 'session';
+  const GUIDES_STORE = 'guides';
   const SESSION_KEY = 'current';
   let dbPromise = null;
   function openDB(){
     if(dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject)=>{
       try{
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = ()=>{ req.result.createObjectStore(STORE, {keyPath:'id'}); };
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = ()=>{
+          const db = req.result;
+          if(!db.objectStoreNames.contains(SESSION_STORE)) db.createObjectStore(SESSION_STORE, {keyPath:'id'});
+          if(!db.objectStoreNames.contains(GUIDES_STORE)) db.createObjectStore(GUIDES_STORE, {keyPath:'id'});
+        };
         req.onsuccess = ()=> resolve(req.result);
         req.onerror = ()=> reject(req.error);
       }catch(e){ reject(e); }
     });
     return dbPromise;
   }
-  async function idbGet(){
+  async function idbGet(storeName, key){
     try{
       const db = await openDB();
       return await new Promise((resolve, reject)=>{
-        const tx = db.transaction(STORE, 'readonly');
-        const req = tx.objectStore(STORE).get(SESSION_KEY);
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).get(key);
         req.onsuccess = ()=> resolve(req.result || null);
         req.onerror = ()=> reject(req.error);
       });
     }catch(e){ return null; }
   }
-  async function idbPut(record){
+  async function idbGetAll(storeName){
     try{
       const db = await openDB();
       return await new Promise((resolve, reject)=>{
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(Object.assign({id: SESSION_KEY}, record));
+        const tx = db.transaction(storeName, 'readonly');
+        const req = tx.objectStore(storeName).getAll();
+        req.onsuccess = ()=> resolve(req.result || []);
+        req.onerror = ()=> reject(req.error);
+      });
+    }catch(e){ return []; }
+  }
+  async function idbPut(storeName, record){
+    try{
+      const db = await openDB();
+      return await new Promise((resolve, reject)=>{
+        const tx = db.transaction(storeName, 'readwrite');
+        tx.objectStore(storeName).put(record);
         tx.oncomplete = ()=> resolve(true);
         tx.onerror = ()=> reject(tx.error);
       });
     }catch(e){ return false; }
   }
-  async function idbClear(){
+  async function idbDelete(storeName, key){
     try{
       const db = await openDB();
       return await new Promise((resolve, reject)=>{
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).delete(SESSION_KEY);
+        const tx = db.transaction(storeName, 'readwrite');
+        tx.objectStore(storeName).delete(key);
         tx.oncomplete = ()=> resolve(true);
         tx.onerror = ()=> reject(tx.error);
       });
@@ -375,7 +440,8 @@
 
   let saveTimer = null;
   async function persistSession(){
-    await idbPut({
+    await idbPut(SESSION_STORE, {
+      id: SESSION_KEY,
       videoBlob: sessionVideoBlob,
       videoName: sessionVideoName,
       videoType: sessionVideoType,
@@ -389,7 +455,7 @@
   }
   async function restore(){
     try{
-      const rec = await idbGet();
+      const rec = await idbGet(SESSION_STORE, SESSION_KEY);
       if(!rec) return;
       let restoredSomething = false;
       if(rec.stills && rec.stills.length){
@@ -417,6 +483,76 @@
     }catch(e){ /* no prior session, ignore */ }
   }
   restore();
+
+  // ---- saved guides library ----
+  let guides = [];
+  async function loadGuides(){
+    const list = await idbGetAll(GUIDES_STORE);
+    list.sort((a,b)=> (b.savedAt||0) - (a.savedAt||0));
+    return list;
+  }
+  async function saveGuide(name, stillsToSave){
+    const guide = {
+      id: 'g'+Date.now()+Math.random().toString(36).slice(2,7),
+      name,
+      savedAt: Date.now(),
+      stills: stillsToSave.map(s=>({dataUrl:s.dataUrl, time:s.time, label:s.label}))
+    };
+    await idbPut(GUIDES_STORE, guide);
+    return guide;
+  }
+  async function refreshLibrary(){
+    guides = await loadGuides();
+    renderLibrary();
+  }
+  function renderLibrary(){
+    libraryList.innerHTML = '';
+    libraryEmpty.style.display = guides.length ? 'none' : 'block';
+    guides.forEach(g=>{
+      const dateStr = new Date(g.savedAt || 0).toLocaleDateString(undefined, {month:'short', day:'numeric'});
+      const thumb = g.stills[0] ? g.stills[0].dataUrl : '';
+      const card = document.createElement('div');
+      card.className = 'frame-card guide-card';
+      card.innerHTML = `
+        <img class="frame-thumb" src="${thumb}" alt="">
+        <div class="frame-body">
+          <input class="guide-name" data-id="${g.id}" value="${(g.name||'').replace(/"/g,'&quot;')}">
+          <div class="frame-time">${g.stills.length} still${g.stills.length===1?'':'s'} &middot; saved ${dateStr}</div>
+        </div>
+        <div class="frame-actions guide-actions">
+          <button class="icon-btn" data-act="view" data-id="${g.id}">View</button>
+          <button class="icon-btn" data-act="pdf" data-id="${g.id}">PDF</button>
+          <button class="icon-btn danger" data-act="del" data-id="${g.id}">&times;</button>
+        </div>
+      `;
+      libraryList.appendChild(card);
+    });
+  }
+  libraryList.addEventListener('click', (e)=>{
+    const btn = e.target.closest('.icon-btn');
+    if(!btn) return;
+    const id = btn.getAttribute('data-id');
+    const g = guides.find(x=>x.id===id);
+    if(!g) return;
+    const act = btn.getAttribute('data-act');
+    if(act==='view'){
+      openPractice(g.stills);
+    } else if(act==='pdf'){
+      printStills(g.stills);
+    } else if(act==='del'){
+      if(!confirm('Delete "'+g.name+'"? This cannot be undone.')) return;
+      idbDelete(GUIDES_STORE, g.id).then(refreshLibrary);
+    }
+  });
+  libraryList.addEventListener('change', (e)=>{
+    if(!e.target.classList.contains('guide-name')) return;
+    const id = e.target.getAttribute('data-id');
+    const g = guides.find(x=>x.id===id);
+    if(!g) return;
+    g.name = e.target.value || g.name;
+    idbPut(GUIDES_STORE, g);
+  });
+  refreshLibrary();
 
   // ---- video loading ----
   const loadStatus = document.getElementById('loadStatus');
@@ -525,7 +661,8 @@
     strip.innerHTML = '';
     filmstripEmpty.style.display = stills.length ? 'none' : 'block';
     practiceBtn.disabled = stills.length === 0;
-    exportBtn.disabled = stills.length === 0;
+    saveLibraryBtn.disabled = stills.length === 0;
+    savePdfBtn.disabled = stills.length === 0;
 
     stills.forEach((s, i)=>{
       const card = document.createElement('div');
@@ -582,7 +719,7 @@
     sessionVideoBlob = null;
     sessionVideoName = null;
     sessionVideoType = null;
-    idbClear();
+    idbDelete(SESSION_STORE, SESSION_KEY);
     renderStrip();
     playerSection.style.display = 'none';
     video.removeAttribute('src');
@@ -591,32 +728,38 @@
   });
 
   // ---- practice mode ----
+  // Takes an explicit stills array so it can show either the in-progress
+  // working set or a saved guide loaded from the library.
   const overlay = document.getElementById('practiceOverlay');
   const practiceImg = document.getElementById('practiceImg');
   const practiceCaption = document.getElementById('practiceCaption');
   const practiceCount = document.getElementById('practiceCount');
   const prevBtn = document.getElementById('prevBtn');
   const nextBtn = document.getElementById('nextBtn');
+  let practiceStills = [];
   let practiceIdx = 0;
 
-  function showPractice(){
-    if(!stills.length) return;
-    practiceIdx = Math.min(practiceIdx, stills.length-1);
-    const s = stills[practiceIdx];
-    practiceImg.src = s.dataUrl;
-    practiceCaption.textContent = s.label;
-    practiceCount.textContent = (practiceIdx+1)+' / '+stills.length;
-    prevBtn.disabled = practiceIdx===0;
-    nextBtn.disabled = practiceIdx===stills.length-1;
-  }
-  practiceBtn.addEventListener('click', ()=>{
+  function openPractice(stillsArr){
+    if(!stillsArr || !stillsArr.length) return;
+    practiceStills = stillsArr;
     practiceIdx = 0;
     overlay.classList.add('open');
     showPractice();
-  });
+  }
+  function showPractice(){
+    if(!practiceStills.length) return;
+    practiceIdx = Math.min(practiceIdx, practiceStills.length-1);
+    const s = practiceStills[practiceIdx];
+    practiceImg.src = s.dataUrl;
+    practiceCaption.textContent = s.label;
+    practiceCount.textContent = (practiceIdx+1)+' / '+practiceStills.length;
+    prevBtn.disabled = practiceIdx===0;
+    nextBtn.disabled = practiceIdx===practiceStills.length-1;
+  }
+  practiceBtn.addEventListener('click', ()=> openPractice(stills));
   document.getElementById('exitPractice').addEventListener('click', ()=> overlay.classList.remove('open'));
   prevBtn.addEventListener('click', ()=>{ if(practiceIdx>0){practiceIdx--; showPractice();} });
-  nextBtn.addEventListener('click', ()=>{ if(practiceIdx<stills.length-1){practiceIdx++; showPractice();} });
+  nextBtn.addEventListener('click', ()=>{ if(practiceIdx<practiceStills.length-1){practiceIdx++; showPractice();} });
 
   let touchStartX = null;
   overlay.addEventListener('touchstart', (e)=>{ touchStartX = e.changedTouches[0].clientX; });
@@ -624,88 +767,40 @@
     if(touchStartX===null) return;
     const dx = e.changedTouches[0].clientX - touchStartX;
     if(dx > 50 && practiceIdx>0){ practiceIdx--; showPractice(); }
-    else if(dx < -50 && practiceIdx<stills.length-1){ practiceIdx++; showPractice(); }
+    else if(dx < -50 && practiceIdx<practiceStills.length-1){ practiceIdx++; showPractice(); }
     touchStartX = null;
   });
 
-  // ---- export standalone offline guide ----
-  exportBtn.addEventListener('click', ()=>{
-    const today = new Date().toISOString().slice(0,10);
-    const framesHtml = stills.map((s,i)=>`
-      <section class="frame" id="f${i}">
-        <div class="fnum">${String(i+1).padStart(2,'0')} / ${String(stills.length).padStart(2,'0')}</div>
-        <img src="${s.dataUrl}" alt="${s.label.replace(/"/g,'&quot;')}">
-        <div class="flabel">${s.label.replace(/</g,'&lt;')}</div>
-      </section>`).join('\n');
+  // ---- save to library ----
+  saveLibraryBtn.addEventListener('click', async ()=>{
+    if(!stills.length) return;
+    const suggested = 'Flourish Guide — '+new Date().toLocaleDateString();
+    const name = prompt('Name this practice guide:', suggested);
+    if(name === null) return; // cancelled
+    const guide = await saveGuide(name.trim() || suggested, stills);
+    await refreshLibrary();
+    statusEl.textContent = 'Saved "'+guide.name+'" to your library.';
+  });
 
-    const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Flourish Practice Guide — ${today}</title>
-<style>
-  :root{--bg:#0A0B0D;--surface:#1F2226;--line:#33383F;--text:#F3F1EA;--brass:#C9A659;}
-  *{box-sizing:border-box;}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,sans-serif;}
-  header{padding:16px 18px 10px;border-bottom:1px solid var(--line);text-align:center;}
-  header .eyebrow{color:var(--brass);font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;margin-bottom:4px;}
-  header h1{margin:0;font-size:18px;text-transform:uppercase;letter-spacing:.05em;}
-  header p{margin:6px 0 0;font-size:12px;color:#9CA0A8;}
-  .frame{display:none;flex-direction:column;align-items:center;padding:16px;min-height:calc(100vh - 130px);justify-content:center;}
-  .frame.active{display:flex;}
-  .fnum{color:var(--brass);font-weight:800;letter-spacing:.05em;font-size:13px;margin-bottom:10px;}
-  .frame img{max-width:100%;max-height:65vh;object-fit:contain;border-radius:8px;border:1px solid var(--line);}
-  .flabel{margin-top:14px;font-size:18px;font-weight:700;text-align:center;padding:0 10px;}
-  nav{position:fixed;bottom:0;left:0;right:0;display:grid;grid-template-columns:1fr 1fr;gap:10px;
-      padding:12px 14px 24px;background:linear-gradient(0deg,var(--bg) 60%,transparent);}
-  nav button{padding:16px;font-size:18px;font-weight:800;border-radius:10px;border:1px solid var(--line);
-      background:#2A2E34;color:var(--text);}
-  nav button:disabled{opacity:.25;}
-</style></head>
-<body>
-<header>
-  <div class="eyebrow">Flourish Practice Guide</div>
-  <h1>${stills.length} steps &middot; saved ${today}</h1>
-  <p>Swipe or tap through — works fully offline.</p>
-</header>
-${framesHtml}
-<nav>
-  <button id="p">&larr; Prev</button>
-  <button id="n">Next &rarr;</button>
-</nav>
-<script>
-  var frames = document.querySelectorAll('.frame');
-  var i = 0;
-  function show(){
-    frames.forEach(function(f,idx){ f.classList.toggle('active', idx===i); });
-    document.getElementById('p').disabled = i===0;
-    document.getElementById('n').disabled = i===frames.length-1;
+  // ---- save as PDF ----
+  // Renders the stills into a hidden print-only sheet, then hands off to the
+  // browser's native print engine. On iOS that opens the print preview,
+  // where the share icon offers "Save to Files" as a real, non-interactive
+  // PDF — which iOS Safari displays natively, unlike a downloaded standalone
+  // HTML file (which iOS often refuses to run scripts in / render properly).
+  function printStills(stillsArr){
+    if(!stillsArr || !stillsArr.length) return;
+    printSheet.innerHTML = stillsArr.map((s,i)=>`
+      <div class="print-page">
+        <div class="print-fnum">${String(i+1).padStart(2,'0')} / ${String(stillsArr.length).padStart(2,'0')}</div>
+        <img src="${s.dataUrl}" alt="">
+        <div class="print-flabel">${(s.label||'').replace(/</g,'&lt;')}</div>
+      </div>
+    `).join('');
+    setTimeout(()=> window.print(), 50); // let the sheet paint before printing
   }
-  document.getElementById('p').onclick = function(){ if(i>0){i--;show();} };
-  document.getElementById('n').onclick = function(){ if(i<frames.length-1){i++;show();} };
-  var sx=null;
-  document.body.addEventListener('touchstart', function(e){ sx=e.changedTouches[0].clientX; });
-  document.body.addEventListener('touchend', function(e){
-    if(sx===null) return;
-    var dx = e.changedTouches[0].clientX - sx;
-    if(dx>50 && i>0){ i--; show(); }
-    else if(dx<-50 && i<frames.length-1){ i++; show(); }
-    sx=null;
-  });
-  show();
-<\/script>
-</body></html>`;
-
-    const blob = new Blob([html], {type:'text/html'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = today+'_Flourish-Practice-Guide.html';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(()=>URL.revokeObjectURL(url), 2000);
-    statusEl.textContent = 'Guide downloaded — save it to Files, then open anytime with no signal.';
-  });
+  window.addEventListener('afterprint', ()=>{ printSheet.innerHTML = ''; });
+  savePdfBtn.addEventListener('click', ()=> printStills(stills));
 
 })();
 </script>
