@@ -245,6 +245,19 @@
   .crop-handle[data-corner="se"]{right:-11px; bottom:-11px; cursor:nwse-resize;}
   .crop-bottom{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px 14px 26px;}
 
+  /* ---- Saved Guides page ---- */
+  .guides-overlay{
+    position:fixed; inset:0; background:var(--bg); z-index:900;
+    display:none; flex-direction:column;
+  }
+  .guides-overlay.open{display:flex;}
+  .guides-top{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:16px 14px 10px; border-bottom:1px solid var(--line); flex-shrink:0;
+  }
+  .guides-body{flex:1; overflow-y:auto; padding:14px 14px 30px;}
+  .open-guides-btn{display:block; width:100%; margin-top:14px;}
+
   input[type=file]{display:none;}
 
   .load-status{
@@ -294,18 +307,10 @@
   <div class="eyebrow">Flourish Breakdown</div>
   <h1>Video &rarr; Stills</h1>
   <p class="sub">Load a clip, step through it at your own pace, and capture the frames that mark each position. Build a still-by-still guide you can flip through in the field.</p>
+  <button class="btn primary btn-full open-guides-btn" id="openGuidesBtn">Saved Guides</button>
 </header>
 
 <main>
-
-  <section id="librarySection">
-    <div class="section-title"><h2>Saved practice guides</h2></div>
-    <label class="btn import-btn" for="importGuideInput">Import guide file&hellip;
-      <input type="file" id="importGuideInput" accept="application/json,.json">
-    </label>
-    <div id="libraryEmpty" class="filmstrip-empty">No saved guides yet — capture some stills below, then use "Save to library" to keep a named guide here for next time. Saved guides live on this device and work with zero connectivity. Made a guide on another device? Use "Import guide file" above to bring it in here.</div>
-    <div class="strip" id="libraryList"></div>
-  </section>
 
   <section id="loadSection">
     <div class="section-title"><span class="section-num">01</span><h2>Load a clip</h2></div>
@@ -356,7 +361,7 @@
 
 </main>
 
-<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-06.1</footer>
+<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-06.2</footer>
 
 <canvas id="canvas"></canvas>
 <div id="printSheet" class="print-sheet"></div>
@@ -394,6 +399,20 @@
   </div>
 </div>
 
+<div class="guides-overlay" id="guidesOverlay">
+  <div class="guides-top">
+    <span class="crop-title">Saved Guides</span>
+    <button class="exit-btn" id="closeGuidesBtn">Close</button>
+  </div>
+  <div class="guides-body">
+    <label class="btn import-btn" for="importGuideInput">Import guide file&hellip;
+      <input type="file" id="importGuideInput" accept="application/json,.json">
+    </label>
+    <div id="libraryEmpty" class="filmstrip-empty">No saved guides yet — capture some stills below, then use "Save to library" to keep a named guide here for next time. Saved guides live on this device and work with zero connectivity. Made a guide on another device? Use "Import guide file" above to bring it in here.</div>
+    <div class="strip" id="libraryList"></div>
+  </div>
+</div>
+
 <script>
 (function(){
   const videoInput = document.getElementById('videoInput');
@@ -416,6 +435,11 @@
   const libraryList = document.getElementById('libraryList');
   const libraryEmpty = document.getElementById('libraryEmpty');
   const printSheet = document.getElementById('printSheet');
+  const guidesOverlay = document.getElementById('guidesOverlay');
+  const openGuidesBtn = document.getElementById('openGuidesBtn');
+  const closeGuidesBtn = document.getElementById('closeGuidesBtn');
+  openGuidesBtn.addEventListener('click', ()=> guidesOverlay.classList.add('open'));
+  closeGuidesBtn.addEventListener('click', ()=> guidesOverlay.classList.remove('open'));
 
   let stills = []; // {id, dataUrl, time, label}
   let idCounter = 1;

@@ -294,3 +294,14 @@ longer serves anything — Pages is disabled for this repo.)
 **Note for next session:** Vercel's git integration auto-deploys on every
 push to `main` with no action needed here going forward — no more manually
 polling a Pages build API after each push.
+
+## 2026-08-06 — Saved Guides moved to its own full-screen view
+
+Was previously an always-visible section stacked above the main
+load/scrub/capture flow, which cluttered the top of the page. Moved to a
+fullscreen overlay (`#guidesOverlay`), matching the pattern already used for
+Practice Mode and the crop tool, opened via a new "Saved Guides" button in
+the header and closed via its own "Close" button. All the underlying
+library logic (IndexedDB CRUD, import/export, render) was untouched — only
+the markup moved, since it all just targets `libraryList`/`libraryEmpty`/
+`importGuideInput` regardless of where those elements live in the DOM.
