@@ -258,3 +258,39 @@ the Saved Guides library and Practice Mode.
 **Still to verify:** that exported guide files actually import cleanly
 across devices in practice, and that the crop tool's drag/resize handles
 behave well on both mouse (PC) and touch (phone) input.
+
+## 2026-08-06 — Moved hosting from GitHub Pages to Vercel
+
+**What happened:** the crop-tool/import-export push, and a follow-up
+`.nojekyll` push meant to speed up deploys, both failed on GitHub's legacy
+Jekyll-based Pages builder ("Page build failed", no further detail given).
+Nothing in the repo's content explains it — no Liquid-template-like syntax,
+`.nojekyll` is a completely ordinary empty file. Tried switching to the
+modern Actions-based deploy (`actions/upload-pages-artifact` +
+`actions/deploy-pages`, added at `.github/workflows/pages.yml`) instead of
+fighting the legacy builder — the upload step succeeded, but the actual
+"Deploy to GitHub Pages" action step still failed (likely an Actions
+permissions/environment propagation issue right after switching the Pages
+`build_type` via the API — not root-caused further, since by then the
+better option had already worked).
+
+**What actually fixed it:** connected the same GitHub repo to Vercel
+instead (Import Git Repository → zero config needed, since this is one
+static `index.html` with no framework or build step). It deployed
+correctly on the first try, immediately serving the exact commit that
+GitHub Pages had been stuck on for over half an hour.
+
+**Decision:** made Vercel the sole live URL and disabled GitHub Pages
+entirely (via API `DELETE .../pages`), rather than keep both — one URL to
+keep straight beats a primary + an intermittently-broken fallback. Also
+removed `.github/workflows/pages.yml` — with Pages disabled it would just
+fail on every future push (no site left to deploy to), which is worse than
+not having it.
+
+**New live URL:** https://dm-video-clipper.vercel.app/
+(old GitHub Pages URL, https://amattin7.github.io/dm_video_clipper/, no
+longer serves anything — Pages is disabled for this repo.)
+
+**Note for next session:** Vercel's git integration auto-deploys on every
+push to `main` with no action needed here going forward — no more manually
+polling a Pages build API after each push.

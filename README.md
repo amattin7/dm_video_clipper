@@ -19,13 +19,18 @@ view on a phone.
 
 ## Live version
 
-Served via GitHub Pages from `index.html` on the `main` branch:
-https://amattin7.github.io/dm_video_clipper/
+Deployed on Vercel from `index.html` on the `main` branch (auto-deploys on
+every push, no build step):
+https://dm-video-clipper.vercel.app/
+
+(Previously hosted on GitHub Pages; moved to Vercel on 2026-08-06 after
+GitHub's Pages builder repeatedly failed to deploy — see
+[docs/progress.md](docs/progress.md). Pages is now disabled for this repo.)
 
 ## Files
 
 - `index.html` — the tool itself (open directly in a browser, or use the
-  Pages URL above on a phone).
+  Vercel URL above on a phone).
 - `Initial_notes.txt` — original working notes from the first drafting
   session (kept for history).
 - `docs/progress.md` — running log of what's done and what's next.
