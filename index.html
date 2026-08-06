@@ -601,15 +601,25 @@
     playerSection.scrollIntoView({behavior:'smooth', block:'start'});
   });
 
+  // Some videos parse fine at the container level (valid duration/dimensions,
+  // read straight from the file header) but never actually decode a single
+  // frame in Safari's <video> element — the preview stays blank, capture
+  // produces a black image, and the scrub bar never moves because no
+  // seeked/timeupdate event ever fires. Seen with HDR HEVC footage, some
+  // variable-frame-rate exports (screen recordings in particular), and
+  // presumably other codec/profile quirks from whatever device a clip
+  // originated on. There's nothing this page can do to force a fix — but it
+  // can at least say so clearly and fast instead of leaving a silent blank
+  // screen, which is what stallCheckTimer below is for.
+  let framesSeen = false;
+  let stallCheckTimer = null;
+  function markFrameSeen(){ framesSeen = true; clearTimeout(stallCheckTimer); }
+
   video.addEventListener('loadedmetadata', ()=>{
     clearTimeout(loadTimeoutId);
     loadStatus.style.display = 'none';
     scrubber.max = video.duration;
     durTime.textContent = fmt(video.duration);
-    // Diagnostic readout — helps tell apart "container reports bad/zero
-    // dimensions" (a genuinely broken file) from "dimensions look fine but
-    // the frame renders blank" (a decode/transform-metadata issue, seen with
-    // some iOS-edited/cropped clips) without needing to plug into a laptop.
     videoDims.style.display = 'block';
     videoDims.textContent = video.videoWidth+'×'+video.videoHeight+' px · '+fmt(video.duration);
     if(pendingRestoreTime != null){
@@ -618,19 +628,32 @@
     } else {
       video.currentTime = 0;
     }
+    framesSeen = false;
+    clearTimeout(stallCheckTimer);
+    stallCheckTimer = setTimeout(()=>{
+      if(framesSeen) return;
+      loadStatus.style.display = 'flex';
+      loadStatus.className = 'load-status warn';
+      loadStatus.innerHTML = '&#9888; This video reported its size and length, but Safari never actually decoded a picture from it — the preview will stay blank and the scrub bar won\'t move, no matter where you drag it. This isn\'t something fixable here; it happens with certain HDR footage, screen recordings, and other codec quirks that Safari\'s player refuses to decode even though other apps play them fine. The reliable workaround: import the clip into iMovie, trim it to the bit you need, then Share &rarr; Save Video — iMovie\'s export flattens it into a standard file this page can read, regardless of what was wrong with the original.';
+    }, 1800);
   });
 
   video.addEventListener('error', ()=>{
     clearTimeout(loadTimeoutId);
+    clearTimeout(stallCheckTimer);
     loadStatus.className = 'load-status warn';
     loadStatus.innerHTML = '&#9888; This video failed to load — it may be in a format the browser can\'t play. Try a clip recorded directly on this phone.';
   });
+  video.addEventListener('loadeddata', markFrameSeen);
+  video.addEventListener('canplay', markFrameSeen);
   video.addEventListener('timeupdate', ()=>{
     scrubber.value = video.currentTime;
     curTime.textContent = fmt(video.currentTime);
+    markFrameSeen();
   });
   video.addEventListener('seeked', ()=>{
     curTime.textContent = fmt(video.currentTime);
+    markFrameSeen();
     schedulePersist(); // keep the resume position roughly up to date too
   });
 
