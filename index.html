@@ -88,6 +88,10 @@
     display:flex; justify-content:space-between; font-size:12px;
     color:var(--text-dim); padding:0 12px 8px; font-variant-numeric:tabular-nums;
   }
+  .video-dims{
+    font-size:11px; color:var(--text-dim); text-align:center;
+    padding:0 12px 8px; font-variant-numeric:tabular-nums;
+  }
 
   .nudge-row{
     display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
@@ -282,6 +286,7 @@
         <input type="range" class="scrub-slider" id="scrubber" min="0" max="1" step="0.001" value="0">
       </div>
       <div class="time-row"><span id="curTime">0.00s</span><span id="durTime">0.00s</span></div>
+      <div class="video-dims" id="videoDims" style="display:none;"></div>
       <div class="nudge-row">
         <button class="nudge-btn" data-d="-1">-1s</button>
         <button class="nudge-btn" data-d="-0.1">-0.1</button>
@@ -337,6 +342,7 @@
   const scrubber = document.getElementById('scrubber');
   const curTime = document.getElementById('curTime');
   const durTime = document.getElementById('durTime');
+  const videoDims = document.getElementById('videoDims');
   const canvas = document.getElementById('canvas');
   const captureBtn = document.getElementById('captureBtn');
   const strip = document.getElementById('strip');
@@ -600,6 +606,12 @@
     loadStatus.style.display = 'none';
     scrubber.max = video.duration;
     durTime.textContent = fmt(video.duration);
+    // Diagnostic readout — helps tell apart "container reports bad/zero
+    // dimensions" (a genuinely broken file) from "dimensions look fine but
+    // the frame renders blank" (a decode/transform-metadata issue, seen with
+    // some iOS-edited/cropped clips) without needing to plug into a laptop.
+    videoDims.style.display = 'block';
+    videoDims.textContent = video.videoWidth+'×'+video.videoHeight+' px · '+fmt(video.duration);
     if(pendingRestoreTime != null){
       video.currentTime = Math.min(pendingRestoreTime, video.duration || pendingRestoreTime);
       pendingRestoreTime = null;
@@ -724,6 +736,7 @@
     playerSection.style.display = 'none';
     video.removeAttribute('src');
     video.load();
+    videoDims.style.display = 'none';
     statusEl.textContent = 'Cleared.';
   });
 
