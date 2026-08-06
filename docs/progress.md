@@ -189,3 +189,72 @@ never had real pixels.
 this specific clip, and whether the HDR-video-capture toggle (Settings →
 Camera → Record Video) is confirmed as a contributing cause for
 self-recorded clips going forward.
+
+## 2026-08-06 — Root cause confirmed: iOS Safari-specific, not the app or the file
+
+**Investigation, in the order it played out:**
+- Added an automatic canvas-based blank-frame sampler (drawImage the current
+  frame into an offscreen canvas, flag if it's ~all-zero). A retest of the
+  clip that had originally worked came back black — immediately raising the
+  question of whether the sampler itself was the problem.
+- Removed the automatic sampler (kept only the passive, non-invasive stall
+  detector that watches for zero decode-progress events). Retested — still
+  black. Ruled out the sampler as the cause.
+- Diffed the full code against the last confirmed-working commit — purely
+  additive (diagnostics, footer, meta tags), nothing touching `video.src`,
+  canvas capture, or `<video>` CSS. Not a code regression.
+- Cleared the saved session, fully closed and reopened the Safari tab, and
+  retried the *exact same, unedited* clip that had worked originally.
+  Confirmed by the user to be the same file (only one clip of that
+  duration, never edited). Still black — ruled out stale IndexedDB/session
+  state and file misidentification.
+- Confirmed the same clip plays correctly natively in the Photos app. Ruled
+  out file corruption and OS/hardware-wide issues (thermal throttling,
+  iCloud re-sync damage) — the asset itself is fine.
+- Recorded a brand-new test clip on the spot and tried it — also black in
+  Safari, with accurate metadata. This is the key result: it's not about
+  any particular file's format/HDR/edit history at all. Every video, right
+  now, fails to render in Safari's `<video>` element on this phone, while
+  Photos' native player handles all of them fine.
+- Tried the page in Chrome on the user's PC (different engine — Blink, not
+  WebKit — and a different device entirely): **works correctly.**
+
+**Conclusion:** this is a live Safari/WebKit-specific video-rendering
+regression on this one iPhone, not a bug in this app and not a bug in any
+particular source file. A phone restart (which had previously fixed an
+unrelated stuck-picker-circle issue) did not clear it this time. Nothing
+in a web page can force a browser to paint video it's refusing to paint —
+there is no code-level fix available here. Left unresolved on the user's
+end: whether an iOS/Safari software update changes this.
+
+**Consequence — workflow pivot:** rather than keep chasing a platform bug,
+the primary editing workflow moves to **desktop Chrome** (confirmed
+working, and mouse/keyboard scrubbing is more precise than fighting
+pinch-zoom on a phone anyway — tapping our own buttons was already causing
+unwanted page-zoom on iOS). The phone's role becomes **viewing only**, via
+the Saved Guides library and Practice Mode.
+
+**New features to support that pivot:**
+- **Import/Export guide files.** A saved guide can now be exported as a
+  small `.flourishguide.json` file (name + stills + labels, images inline)
+  via a Blob download, and imported back in via a file picker on the
+  Saved Guides section. This is how a guide built on a PC gets onto a
+  phone: transfer the file however (AirDrop, iCloud Drive, email, USB),
+  then import it into the same hosted app running in Safari there. Unlike
+  the original standalone-HTML export, this works on iOS because the
+  receiving device is never asked to execute script from a locally-opened
+  file — it's just handing a small data file to the already-properly-hosted
+  page, which does the actual work. Still no accounts, no backend.
+- **Crop tool for captured stills.** Deliberately proposed as a better fix
+  than pre-cropping source video (which is what led into the whole HDR
+  investigation above): crop happens *after* capture, on a plain JPEG, with
+  zero video-decoder involvement, so none of the codec/HDR class of bugs
+  can follow it here. A fullscreen overlay shows the still with a
+  draggable/resizable crop rectangle (pointer events, so mouse and touch
+  both work), Reset/Apply/Cancel controls, and applies via a canvas crop
+  mapped from displayed to natural image coordinates. Scoped to the working
+  filmstrip for now — not yet available on already-saved library guides.
+
+**Still to verify:** that exported guide files actually import cleanly
+across devices in practice, and that the crop tool's drag/resize handles
+behave well on both mouse (PC) and touch (phone) input.

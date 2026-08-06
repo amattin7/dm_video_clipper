@@ -160,8 +160,12 @@
     width:100%; background:none; border:none; color:var(--text);
     font-size:14px; font-weight:700; padding:2px 0;
   }
-  .guide-actions{display:flex; flex-direction:column; gap:5px;}
-  .guide-actions .icon-btn{width:44px; font-size:11px; font-weight:700; text-transform:uppercase;}
+  .guide-actions{display:grid; grid-template-columns:1fr 1fr; gap:5px;}
+  .guide-actions .icon-btn{width:38px; font-size:10.5px; font-weight:700; text-transform:uppercase;}
+  .import-btn{
+    display:block; text-align:center; margin-bottom:10px; cursor:pointer;
+  }
+  .import-btn input{display:none;}
 
   /* ---- Buttons row ---- */
   .action-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;}
@@ -210,6 +214,36 @@
   }
   .nav-btn:active{background:var(--brass-dim);}
   .nav-btn:disabled{opacity:.25;}
+
+  /* ---- Crop overlay ---- */
+  .crop-overlay{
+    position:fixed; inset:0; background:#0A0B0D; z-index:1100;
+    display:none; flex-direction:column;
+  }
+  .crop-overlay.open{display:flex;}
+  .crop-top{display:flex; justify-content:space-between; align-items:center; padding:14px 14px 8px;}
+  .crop-title{
+    color:var(--brass); font-weight:800; font-size:13px;
+    font-family:"Arial Narrow",Arial,sans-serif; letter-spacing:.05em; text-transform:uppercase;
+  }
+  .crop-stage{
+    flex:1; position:relative; display:flex; align-items:center; justify-content:center;
+    overflow:hidden; padding:10px; min-height:0; touch-action:none;
+  }
+  .crop-stage img{max-width:100%; max-height:100%; display:block; -webkit-user-drag:none; user-select:none;}
+  .crop-rect{
+    position:absolute; border:2px solid var(--brass);
+    box-shadow:0 0 0 9999px rgba(0,0,0,.55); touch-action:none; cursor:move;
+  }
+  .crop-handle{
+    position:absolute; width:22px; height:22px; background:var(--brass);
+    border:2px solid #17191d; border-radius:50%; touch-action:none;
+  }
+  .crop-handle[data-corner="nw"]{left:-11px; top:-11px; cursor:nwse-resize;}
+  .crop-handle[data-corner="ne"]{right:-11px; top:-11px; cursor:nesw-resize;}
+  .crop-handle[data-corner="sw"]{left:-11px; bottom:-11px; cursor:nesw-resize;}
+  .crop-handle[data-corner="se"]{right:-11px; bottom:-11px; cursor:nwse-resize;}
+  .crop-bottom{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px 14px 26px;}
 
   input[type=file]{display:none;}
 
@@ -266,7 +300,10 @@
 
   <section id="librarySection">
     <div class="section-title"><h2>Saved practice guides</h2></div>
-    <div id="libraryEmpty" class="filmstrip-empty">No saved guides yet — capture some stills below, then use "Save to library" to keep a named guide here for next time. Saved guides live on this device and work with zero connectivity.</div>
+    <label class="btn import-btn" for="importGuideInput">Import guide file&hellip;
+      <input type="file" id="importGuideInput" accept="application/json,.json">
+    </label>
+    <div id="libraryEmpty" class="filmstrip-empty">No saved guides yet — capture some stills below, then use "Save to library" to keep a named guide here for next time. Saved guides live on this device and work with zero connectivity. Made a guide on another device? Use "Import guide file" above to bring it in here.</div>
     <div class="strip" id="libraryList"></div>
   </section>
 
@@ -319,7 +356,7 @@
 
 </main>
 
-<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-05.8</footer>
+<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-06.1</footer>
 
 <canvas id="canvas"></canvas>
 <div id="printSheet" class="print-sheet"></div>
@@ -334,6 +371,26 @@
   <div class="practice-nav">
     <button class="nav-btn" id="prevBtn">&larr; Prev</button>
     <button class="nav-btn" id="nextBtn">Next &rarr;</button>
+  </div>
+</div>
+
+<div class="crop-overlay" id="cropOverlay">
+  <div class="crop-top">
+    <span class="crop-title">Crop this still</span>
+    <button class="exit-btn" id="cropCancelBtn">Cancel</button>
+  </div>
+  <div class="crop-stage" id="cropStage">
+    <img id="cropImg" src="" alt="" draggable="false">
+    <div class="crop-rect" id="cropRect">
+      <div class="crop-handle" data-corner="nw"></div>
+      <div class="crop-handle" data-corner="ne"></div>
+      <div class="crop-handle" data-corner="sw"></div>
+      <div class="crop-handle" data-corner="se"></div>
+    </div>
+  </div>
+  <div class="crop-bottom">
+    <button class="btn" id="cropResetBtn">Reset</button>
+    <button class="btn primary" id="cropApplyBtn">Apply crop</button>
   </div>
 </div>
 
@@ -532,11 +589,30 @@
         <div class="frame-actions guide-actions">
           <button class="icon-btn" data-act="view" data-id="${g.id}">View</button>
           <button class="icon-btn" data-act="pdf" data-id="${g.id}">PDF</button>
+          <button class="icon-btn" data-act="export" data-id="${g.id}">Export</button>
           <button class="icon-btn danger" data-act="del" data-id="${g.id}">&times;</button>
         </div>
       `;
       libraryList.appendChild(card);
     });
+  }
+  // ---- export a guide as a portable file, for moving between devices ----
+  // Not a standalone runnable page (that's the old approach that iOS won't
+  // reliably execute scripts in once downloaded) — just a small data file.
+  // The receiving device opens this same hosted app and imports it, so all
+  // the actual code runs in a properly-hosted context the whole time.
+  function exportGuide(g){
+    const payload = {app:'flourish-breakdown-guide', version:1, name:g.name, savedAt:g.savedAt, stills:g.stills};
+    const blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const safeName = (g.name||'flourish-guide').replace(/[^a-z0-9 _-]/gi,'').trim().replace(/\s+/g,'-') || 'flourish-guide';
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeName+'.flourishguide.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
   }
   libraryList.addEventListener('click', (e)=>{
     const btn = e.target.closest('.icon-btn');
@@ -549,6 +625,8 @@
       openPractice(g.stills);
     } else if(act==='pdf'){
       printStills(g.stills);
+    } else if(act==='export'){
+      exportGuide(g);
     } else if(act==='del'){
       if(!confirm('Delete "'+g.name+'"? This cannot be undone.')) return;
       idbDelete(GUIDES_STORE, g.id).then(refreshLibrary);
@@ -562,6 +640,33 @@
     g.name = e.target.value || g.name;
     idbPut(GUIDES_STORE, g);
   });
+
+  // ---- import a guide file exported from another device ----
+  const importGuideInput = document.getElementById('importGuideInput');
+  importGuideInput.addEventListener('change', async (e)=>{
+    const file = e.target.files[0];
+    importGuideInput.value = '';
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if(!data || !Array.isArray(data.stills) || !data.stills.length){
+        throw new Error('missing stills array');
+      }
+      const guide = {
+        id: 'g'+Date.now()+Math.random().toString(36).slice(2,7),
+        name: data.name || file.name.replace(/\.flourishguide\.json$|\.json$/i, '') || 'Imported guide',
+        savedAt: Date.now(),
+        stills: data.stills.map(s=>({dataUrl: s.dataUrl, time: s.time||0, label: s.label||''}))
+      };
+      await idbPut(GUIDES_STORE, guide);
+      await refreshLibrary();
+      statusEl.textContent = 'Imported "'+guide.name+'" into your library.';
+    }catch(err){
+      alert('Could not read that as a practice guide file. Make sure it\'s a .flourishguide.json file exported from this app.');
+    }
+  });
+
   refreshLibrary();
 
   // ---- video loading ----
@@ -730,6 +835,7 @@
         <div class="frame-actions">
           <button class="icon-btn" data-act="up" data-id="${s.id}" ${i===0?'disabled':''}>&uarr;</button>
           <button class="icon-btn" data-act="down" data-id="${s.id}" ${i===stills.length-1?'disabled':''}>&darr;</button>
+          <button class="icon-btn" data-act="crop" data-id="${s.id}">&#9986;</button>
           <button class="icon-btn danger" data-act="del" data-id="${s.id}">&times;</button>
         </div>
       `;
@@ -744,7 +850,10 @@
     const idx = stills.findIndex(s=>s.id===id);
     if(idx<0) return;
     const act = btn.getAttribute('data-act');
-    if(act==='up' && idx>0){
+    if(act==='crop'){
+      openCrop(idx);
+      return;
+    } else if(act==='up' && idx>0){
       [stills[idx-1], stills[idx]] = [stills[idx], stills[idx-1]];
     } else if(act==='down' && idx<stills.length-1){
       [stills[idx+1], stills[idx]] = [stills[idx], stills[idx+1]];
@@ -820,6 +929,134 @@
     if(dx > 50 && practiceIdx>0){ practiceIdx--; showPractice(); }
     else if(dx < -50 && practiceIdx<practiceStills.length-1){ practiceIdx++; showPractice(); }
     touchStartX = null;
+  });
+
+  // ---- crop tool ----
+  // Crops a captured still after the fact, e.g. to zoom in on a hand/mace
+  // detail. Deliberately independent of the video pipeline entirely — by
+  // this point a still is just a plain JPEG, so none of the codec/HDR mess
+  // from video decoding can follow it here.
+  const cropOverlay = document.getElementById('cropOverlay');
+  const cropStage = document.getElementById('cropStage');
+  const cropImg = document.getElementById('cropImg');
+  const cropRectEl = document.getElementById('cropRect');
+  const cropCancelBtn = document.getElementById('cropCancelBtn');
+  const cropResetBtn = document.getElementById('cropResetBtn');
+  const cropApplyBtn = document.getElementById('cropApplyBtn');
+  const CROP_MIN = 24; // px, in displayed (CSS) coordinates
+
+  let cropTargetIdx = -1;
+  let cropRectBox = {x:0, y:0, w:0, h:0}; // CSS px, relative to the image's own top-left
+  let cropImgBox = {left:0, top:0, width:0, height:0}; // image's box relative to cropStage
+  let cropDragMode = null; // 'move' | 'nw' | 'ne' | 'sw' | 'se'
+  let cropDragStart = null;
+
+  function openCrop(idx){
+    if(idx<0 || idx>=stills.length) return;
+    cropTargetIdx = idx;
+    cropImg.src = stills[idx].dataUrl;
+    cropOverlay.classList.add('open');
+    const init = ()=>{ layoutCropImgBox(); resetCropRect(); };
+    if(cropImg.complete && cropImg.naturalWidth){ init(); } else { cropImg.onload = init; }
+  }
+  function layoutCropImgBox(){
+    const stageBox = cropStage.getBoundingClientRect();
+    const imgBox = cropImg.getBoundingClientRect();
+    cropImgBox = {
+      left: imgBox.left - stageBox.left,
+      top: imgBox.top - stageBox.top,
+      width: imgBox.width,
+      height: imgBox.height
+    };
+  }
+  function resetCropRect(){
+    const w = cropImgBox.width * 0.7, h = cropImgBox.height * 0.7;
+    cropRectBox = { x:(cropImgBox.width-w)/2, y:(cropImgBox.height-h)/2, w, h };
+    renderCropRect();
+  }
+  function renderCropRect(){
+    cropRectEl.style.left = (cropImgBox.left + cropRectBox.x)+'px';
+    cropRectEl.style.top = (cropImgBox.top + cropRectBox.y)+'px';
+    cropRectEl.style.width = cropRectBox.w+'px';
+    cropRectEl.style.height = cropRectBox.h+'px';
+  }
+  function clampCropRect(){
+    cropRectBox.w = Math.max(CROP_MIN, Math.min(cropRectBox.w, cropImgBox.width));
+    cropRectBox.h = Math.max(CROP_MIN, Math.min(cropRectBox.h, cropImgBox.height));
+    cropRectBox.x = Math.max(0, Math.min(cropRectBox.x, cropImgBox.width - cropRectBox.w));
+    cropRectBox.y = Math.max(0, Math.min(cropRectBox.y, cropImgBox.height - cropRectBox.h));
+  }
+  function cropPointFromEvent(e){
+    const stageBox = cropStage.getBoundingClientRect();
+    return { x: e.clientX - stageBox.left, y: e.clientY - stageBox.top };
+  }
+  cropRectEl.addEventListener('pointerdown', (e)=>{
+    const handle = e.target.closest('.crop-handle');
+    cropDragMode = handle ? handle.getAttribute('data-corner') : 'move';
+    const p = cropPointFromEvent(e);
+    cropDragStart = { px:p.x, py:p.y, rect:Object.assign({}, cropRectBox) };
+    cropRectEl.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  cropRectEl.addEventListener('pointermove', (e)=>{
+    if(!cropDragMode) return;
+    const p = cropPointFromEvent(e);
+    const dx = p.x - cropDragStart.px, dy = p.y - cropDragStart.py;
+    const r = cropDragStart.rect;
+    if(cropDragMode === 'move'){
+      cropRectBox.x = r.x + dx;
+      cropRectBox.y = r.y + dy;
+    } else {
+      let {x, y, w, h} = r;
+      if(cropDragMode.includes('w')){ x = r.x+dx; w = r.w-dx; }
+      if(cropDragMode.includes('e')){ w = r.w+dx; }
+      if(cropDragMode.includes('n')){ y = r.y+dy; h = r.h-dy; }
+      if(cropDragMode.includes('s')){ h = r.h+dy; }
+      cropRectBox = {x, y, w, h};
+    }
+    clampCropRect();
+    renderCropRect();
+  });
+  function endCropDrag(e){
+    if(cropDragMode && e.pointerId != null){
+      try{ cropRectEl.releasePointerCapture(e.pointerId); }catch(err){}
+    }
+    cropDragMode = null;
+    cropDragStart = null;
+  }
+  cropRectEl.addEventListener('pointerup', endCropDrag);
+  cropRectEl.addEventListener('pointercancel', endCropDrag);
+  window.addEventListener('resize', ()=>{
+    if(!cropOverlay.classList.contains('open') || !cropImgBox.width) return;
+    const fx = cropRectBox.x/cropImgBox.width, fy = cropRectBox.y/cropImgBox.height;
+    const fw = cropRectBox.w/cropImgBox.width, fh = cropRectBox.h/cropImgBox.height;
+    layoutCropImgBox();
+    cropRectBox = { x:fx*cropImgBox.width, y:fy*cropImgBox.height, w:fw*cropImgBox.width, h:fh*cropImgBox.height };
+    clampCropRect();
+    renderCropRect();
+  });
+  cropCancelBtn.addEventListener('click', ()=>{
+    cropOverlay.classList.remove('open');
+    cropTargetIdx = -1;
+  });
+  cropResetBtn.addEventListener('click', resetCropRect);
+  cropApplyBtn.addEventListener('click', ()=>{
+    if(cropTargetIdx < 0 || !cropImgBox.width) return;
+    const idx = cropTargetIdx;
+    const scaleX = cropImg.naturalWidth / cropImgBox.width;
+    const scaleY = cropImg.naturalHeight / cropImgBox.height;
+    const sx = cropRectBox.x*scaleX, sy = cropRectBox.y*scaleY;
+    const sw = cropRectBox.w*scaleX, sh = cropRectBox.h*scaleY;
+    const tc = document.createElement('canvas');
+    tc.width = Math.max(1, Math.round(sw));
+    tc.height = Math.max(1, Math.round(sh));
+    tc.getContext('2d').drawImage(cropImg, sx, sy, sw, sh, 0, 0, tc.width, tc.height);
+    stills[idx].dataUrl = tc.toDataURL('image/jpeg', 0.9);
+    renderStrip();
+    schedulePersist();
+    cropOverlay.classList.remove('open');
+    cropTargetIdx = -1;
+    statusEl.textContent = 'Cropped step '+(idx+1)+'.';
   });
 
   // ---- save to library ----
