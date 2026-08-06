@@ -142,3 +142,50 @@ lean on that instead of fighting the download-and-reopen path.
 Files actually produces a clean multi-page PDF on the user's phone, and
 that the saved-guides library survives normal day-to-day use (reopening the
 app days later, per the ITP caveat above).
+
+## 2026-08-05 — Blank preview on a cropped/HDR clip
+
+**Reported:** a video cropped/zoomed in Photos loaded successfully (correct
+1346×1810 / 18.23s reported) but the preview stayed blank, capture produced
+a black image, and the scrub bar never moved regardless of drag position. A
+raw, unedited iPhone recording loads fine.
+
+**Diagnosis, in order of what was ruled out:**
+1. Not an aspect-ratio/CSS issue — `video{width:100%; max-height:52vh}`
+   scales any ratio proportionally; it wouldn't go fully blank over this.
+2. Not (only) the "non-destructive crop metadata" theory floated initially
+   — re-exporting via Photos Duplicate → Share → Save to Files → Save Video
+   still failed, which should have forced a flattened re-render if that were
+   the whole story.
+3. The real signature: container-level metadata (duration, dimensions)
+   parses fine — those come straight from the file header — but the actual
+   video track never decodes a single frame in Safari's `<video>` element.
+   No `seeked`/`timeupdate` ever fires. Most likely categories: HDR HEVC
+   (common default on iPhone 12 Pro+) or variable-frame-rate exports (screen
+   recordings in particular) hitting a WebKit decode limitation that native
+   AVFoundation-based apps (Photos, QuickTime) don't have.
+
+**Why this can't be "just record with HDR off" going forward:** clips also
+come from other people and from iOS screen recordings (e.g. of a YouTube
+video), so the source format is often outside the user's control. No
+in-page fix is possible for a file the browser's decoder refuses to touch.
+
+**What shipped:** a stall detector — if no frame has decoded ~1.8s after
+`loadedmetadata`, show a specific warning instead of a silent blank screen,
+naming the one source-agnostic workaround that exists on-device: import the
+clip into iMovie, trim it, Share → Save Video. iMovie's export pipeline is
+far more tolerant than Safari's `<video>` tag and flattens whatever was
+wrong (HDR, VFR, an unfamiliar codec profile from someone else's phone)
+into a standard file this page can read. Also added a persistent
+width×height×duration readout under the scrub bar generally, so any future
+report of "it won't load" comes with real numbers instead of guesswork.
+
+**Separately noted, not yet hit:** screen-recording DRM/copy-protected
+video (not plain YouTube) can come out solid black at the recording level —
+a different failure mode that no re-export fixes, since the capture itself
+never had real pixels.
+
+**Still open:** whether the iMovie re-export workaround actually resolves
+this specific clip, and whether the HDR-video-capture toggle (Settings →
+Camera → Record Video) is confirmed as a contributing cause for
+self-recorded clips going forward.
