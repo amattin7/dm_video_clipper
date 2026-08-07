@@ -326,3 +326,12 @@ on each saved-guide card read as cramped against the right edge. Widened
 the buttons (38→44px, unset→30px height), increased the grid gap (5→8px),
 and added a left border + padding to visually separate the actions from
 the name/metadata column.
+
+**Follow-up same day — still too small.** Reworked the hierarchy instead of
+just adding spacing: View and PDF (the two actions used constantly) are now
+full-height buttons matching the whole card's row height (`align-items:
+stretch` on `.guide-card`), with View styled as the primary/brass action
+since it's the one used every practice session. Export and Delete (rare
+actions) moved down into small underlined text-link-style buttons inline
+with the "N stills · saved <date>" metadata line, instead of competing for
+space in the same button cluster.
