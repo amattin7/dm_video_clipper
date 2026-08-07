@@ -305,3 +305,24 @@ the header and closed via its own "Close" button. All the underlying
 library logic (IndexedDB CRUD, import/export, render) was untouched — only
 the markup moved, since it all just targets `libraryList`/`libraryEmpty`/
 `importGuideInput` regardless of where those elements live in the DOM.
+
+## 2026-08-06 — Direction-arrow stickers in the crop tool, guide-card spacing
+
+**Direction-arrow stickers:** a tray of 8 compass-direction arrows (12, 1:30,
+3, 4:30, 6, 7:30, 9, 10:30 — 45° steps) appears in the crop overlay. Drag
+one onto the photo to mark which way the mace was moving; drag a placed
+arrow to reposition it; tap its small × badge to remove it. Same arrow
+polygon is used both for the on-screen SVG stickers and for baking the
+final arrow(s) onto the cropped canvas (`drawArrowOnCanvas`, mirroring the
+SVG's point list) — what you place is exactly what ends up in the saved
+still. Position is stored relative to the image's displayed box (same
+approach as the existing crop rectangle), so it survives a window resize
+via the same proportional-rescale logic. Arrow placement/creation reuses
+the pointer-capture drag pattern already established for the crop
+rectangle, for mouse+touch consistency.
+
+**Guide-card spacing:** the 2×2 action-button grid (View/PDF/Export/Delete)
+on each saved-guide card read as cramped against the right edge. Widened
+the buttons (38→44px, unset→30px height), increased the grid gap (5→8px),
+and added a left border + padding to visually separate the actions from
+the name/metadata column.

@@ -155,13 +155,17 @@
   .icon-btn:active{background:var(--line);}
 
   /* ---- Saved guides library ---- */
+  .guide-card{gap:12px;}
   .guide-card .frame-thumb{width:52px; height:52px;}
   .guide-name{
     width:100%; background:none; border:none; color:var(--text);
     font-size:14px; font-weight:700; padding:2px 0;
   }
-  .guide-actions{display:grid; grid-template-columns:1fr 1fr; gap:5px;}
-  .guide-actions .icon-btn{width:38px; font-size:10.5px; font-weight:700; text-transform:uppercase;}
+  .guide-actions{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+    padding-left:12px; margin-left:2px; border-left:1px solid var(--line); flex-shrink:0;
+  }
+  .guide-actions .icon-btn{width:44px; height:30px; font-size:11px; font-weight:700; text-transform:uppercase;}
   .import-btn{
     display:block; text-align:center; margin-bottom:10px; cursor:pointer;
   }
@@ -244,6 +248,29 @@
   .crop-handle[data-corner="sw"]{left:-11px; bottom:-11px; cursor:nesw-resize;}
   .crop-handle[data-corner="se"]{right:-11px; bottom:-11px; cursor:nwse-resize;}
   .crop-bottom{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:14px 14px 26px;}
+
+  /* ---- Direction-arrow stickers (crop overlay) ---- */
+  .crop-arrows-hint{font-size:11px; color:var(--text-dim); text-align:center; padding:6px 14px 0; flex-shrink:0;}
+  .crop-arrows-tray{
+    display:flex; gap:8px; justify-content:center; flex-wrap:wrap;
+    padding:8px 14px; flex-shrink:0;
+  }
+  .arrow-chip{
+    width:36px; height:36px; background:var(--surface-raised); border:1px solid var(--line);
+    border-radius:8px; padding:4px; cursor:grab; touch-action:none; flex-shrink:0;
+  }
+  .arrow-chip:active{background:var(--brass-dim); cursor:grabbing;}
+  .arrow-icon{width:100%; height:100%; display:block; pointer-events:none;}
+  .placed-arrow{
+    position:absolute; width:38px; height:38px; margin:-19px 0 0 -19px;
+    touch-action:none; cursor:move;
+  }
+  .placed-arrow .arrow-icon{filter:drop-shadow(0 1px 3px rgba(0,0,0,.7));}
+  .arrow-remove{
+    position:absolute; top:-8px; right:-8px; width:18px; height:18px; border-radius:50%;
+    background:#1a1a1a; color:#fff; border:1px solid rgba(255,255,255,.5); font-size:12px; line-height:1;
+    display:flex; align-items:center; justify-content:center; padding:0;
+  }
 
   /* ---- Saved Guides page ---- */
   .guides-overlay{
@@ -361,7 +388,7 @@
 
 </main>
 
-<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-06.2</footer>
+<footer style="text-align:center; padding:6px 14px 26px; color:var(--text-dim); font-size:10px; letter-spacing:.04em;">build 2026-08-06.3</footer>
 
 <canvas id="canvas"></canvas>
 <div id="printSheet" class="print-sheet"></div>
@@ -393,6 +420,8 @@
       <div class="crop-handle" data-corner="se"></div>
     </div>
   </div>
+  <div class="crop-arrows-hint">Drag an arrow onto the photo to mark movement direction</div>
+  <div class="crop-arrows-tray" id="cropArrowsTray"></div>
   <div class="crop-bottom">
     <button class="btn" id="cropResetBtn">Reset</button>
     <button class="btn primary" id="cropApplyBtn">Apply crop</button>
@@ -967,6 +996,7 @@
   const cropCancelBtn = document.getElementById('cropCancelBtn');
   const cropResetBtn = document.getElementById('cropResetBtn');
   const cropApplyBtn = document.getElementById('cropApplyBtn');
+  const cropArrowsTray = document.getElementById('cropArrowsTray');
   const CROP_MIN = 24; // px, in displayed (CSS) coordinates
 
   let cropTargetIdx = -1;
@@ -975,12 +1005,119 @@
   let cropDragMode = null; // 'move' | 'nw' | 'ne' | 'sw' | 'se'
   let cropDragStart = null;
 
+  // ---- direction-arrow stickers ----
+  // 8 compass directions: 0deg = 12 o'clock, going clockwise in 45deg steps.
+  // Same polygon is used both for the on-screen SVG stickers and for baking
+  // the final chosen arrow(s) onto the cropped canvas, so what you place is
+  // exactly what ends up in the saved still.
+  const ARROW_ANGLES = [0,45,90,135,180,225,270,315];
+  const ARROW_POINTS = "0,-42 24,-6 9,-6 9,42 -9,42 -9,-6 -24,-6";
+  const ARROW_DISPLAY_SIZE = 38; // px, matches .placed-arrow width/height
+  function arrowSVG(angleDeg){
+    return '<svg viewBox="-50 -50 100 100" class="arrow-icon" style="transform:rotate('+angleDeg+'deg)">'
+      + '<polygon points="'+ARROW_POINTS+'" fill="#FFD400" stroke="#111" stroke-width="7" stroke-linejoin="round"/></svg>';
+  }
+  function drawArrowOnCanvas(ctx, cx, cy, size, angleDeg){
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angleDeg * Math.PI/180);
+    const s = size/100;
+    const pts = ARROW_POINTS.split(' ').map(p=>p.split(',').map(Number));
+    ctx.beginPath();
+    pts.forEach(([px,py], i)=>{
+      const X = px*s, Y = py*s;
+      if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = '#FFD400';
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = Math.max(1, 7*s);
+    ctx.lineJoin = 'round';
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  ARROW_ANGLES.forEach(angle=>{
+    const chip = document.createElement('div');
+    chip.className = 'arrow-chip';
+    chip.setAttribute('data-angle', angle);
+    chip.innerHTML = arrowSVG(angle);
+    cropArrowsTray.appendChild(chip);
+  });
+
+  let placedArrows = []; // {id, angle, x, y} — x,y are CSS px relative to cropImgBox
+  let arrowDragState = null;
+  function renderPlacedArrows(){
+    cropStage.querySelectorAll('.placed-arrow').forEach(el=>el.remove());
+    placedArrows.forEach(a=>{
+      const el = document.createElement('div');
+      el.className = 'placed-arrow';
+      el.dataset.id = a.id;
+      el.style.left = (cropImgBox.left + a.x)+'px';
+      el.style.top = (cropImgBox.top + a.y)+'px';
+      el.innerHTML = arrowSVG(a.angle) + '<button class="arrow-remove" data-id="'+a.id+'" title="Remove">&times;</button>';
+      cropStage.appendChild(el);
+    });
+  }
+  function startArrowDrag(el, arrowObj, e){
+    const p = cropPointFromEvent(e);
+    arrowDragState = { el, arrowObj, startPx:p.x, startPy:p.y, startX:arrowObj.x, startY:arrowObj.y };
+    try{ el.setPointerCapture(e.pointerId); }catch(err){}
+    e.preventDefault();
+  }
+  cropArrowsTray.addEventListener('pointerdown', (e)=>{
+    const chip = e.target.closest('.arrow-chip');
+    if(!chip || !cropImgBox.width) return;
+    const angle = parseInt(chip.getAttribute('data-angle'), 10);
+    const p = cropPointFromEvent(e);
+    const newArrow = {
+      id: 'a'+Date.now()+Math.random().toString(36).slice(2,6),
+      angle,
+      x: p.x - cropImgBox.left,
+      y: p.y - cropImgBox.top
+    };
+    placedArrows.push(newArrow);
+    renderPlacedArrows();
+    const el = cropStage.querySelector('.placed-arrow[data-id="'+newArrow.id+'"]');
+    if(el) startArrowDrag(el, newArrow, e);
+  });
+  cropStage.addEventListener('pointerdown', (e)=>{
+    const removeBtn = e.target.closest('.arrow-remove');
+    if(removeBtn){
+      const id = removeBtn.getAttribute('data-id');
+      placedArrows = placedArrows.filter(a=>a.id!==id);
+      renderPlacedArrows();
+      return;
+    }
+    const placedEl = e.target.closest('.placed-arrow');
+    if(placedEl){
+      const arrowObj = placedArrows.find(a=>a.id===placedEl.dataset.id);
+      if(arrowObj) startArrowDrag(placedEl, arrowObj, e);
+    }
+  });
+  cropStage.addEventListener('pointermove', (e)=>{
+    if(!arrowDragState) return;
+    const p = cropPointFromEvent(e);
+    arrowDragState.arrowObj.x = arrowDragState.startX + (p.x - arrowDragState.startPx);
+    arrowDragState.arrowObj.y = arrowDragState.startY + (p.y - arrowDragState.startPy);
+    arrowDragState.el.style.left = (cropImgBox.left + arrowDragState.arrowObj.x)+'px';
+    arrowDragState.el.style.top = (cropImgBox.top + arrowDragState.arrowObj.y)+'px';
+  });
+  function endArrowDrag(e){
+    if(!arrowDragState) return;
+    try{ arrowDragState.el.releasePointerCapture(e.pointerId); }catch(err){}
+    arrowDragState = null;
+  }
+  cropStage.addEventListener('pointerup', endArrowDrag);
+  cropStage.addEventListener('pointercancel', endArrowDrag);
+
   function openCrop(idx){
     if(idx<0 || idx>=stills.length) return;
     cropTargetIdx = idx;
+    placedArrows = [];
     cropImg.src = stills[idx].dataUrl;
     cropOverlay.classList.add('open');
-    const init = ()=>{ layoutCropImgBox(); resetCropRect(); };
+    const init = ()=>{ layoutCropImgBox(); resetCropRect(); renderPlacedArrows(); };
     if(cropImg.complete && cropImg.naturalWidth){ init(); } else { cropImg.onload = init; }
   }
   function layoutCropImgBox(){
@@ -1054,16 +1191,24 @@
     if(!cropOverlay.classList.contains('open') || !cropImgBox.width) return;
     const fx = cropRectBox.x/cropImgBox.width, fy = cropRectBox.y/cropImgBox.height;
     const fw = cropRectBox.w/cropImgBox.width, fh = cropRectBox.h/cropImgBox.height;
+    const arrowFracs = placedArrows.map(a=>({a, fx:a.x/cropImgBox.width, fy:a.y/cropImgBox.height}));
     layoutCropImgBox();
     cropRectBox = { x:fx*cropImgBox.width, y:fy*cropImgBox.height, w:fw*cropImgBox.width, h:fh*cropImgBox.height };
     clampCropRect();
     renderCropRect();
+    arrowFracs.forEach(({a,fx,fy})=>{ a.x = fx*cropImgBox.width; a.y = fy*cropImgBox.height; });
+    renderPlacedArrows();
   });
   cropCancelBtn.addEventListener('click', ()=>{
     cropOverlay.classList.remove('open');
     cropTargetIdx = -1;
+    placedArrows = [];
   });
-  cropResetBtn.addEventListener('click', resetCropRect);
+  cropResetBtn.addEventListener('click', ()=>{
+    resetCropRect();
+    placedArrows = [];
+    renderPlacedArrows();
+  });
   cropApplyBtn.addEventListener('click', ()=>{
     if(cropTargetIdx < 0 || !cropImgBox.width) return;
     const idx = cropTargetIdx;
@@ -1074,12 +1219,18 @@
     const tc = document.createElement('canvas');
     tc.width = Math.max(1, Math.round(sw));
     tc.height = Math.max(1, Math.round(sh));
-    tc.getContext('2d').drawImage(cropImg, sx, sy, sw, sh, 0, 0, tc.width, tc.height);
+    const tctx = tc.getContext('2d');
+    tctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, tc.width, tc.height);
+    const arrowScale = (scaleX + scaleY) / 2;
+    placedArrows.forEach(a=>{
+      drawArrowOnCanvas(tctx, a.x*scaleX - sx, a.y*scaleY - sy, ARROW_DISPLAY_SIZE*arrowScale, a.angle);
+    });
     stills[idx].dataUrl = tc.toDataURL('image/jpeg', 0.9);
     renderStrip();
     schedulePersist();
     cropOverlay.classList.remove('open');
     cropTargetIdx = -1;
+    placedArrows = [];
     statusEl.textContent = 'Cropped step '+(idx+1)+'.';
   });
 
